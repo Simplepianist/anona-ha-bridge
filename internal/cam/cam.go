@@ -299,16 +299,24 @@ var algName = map[uint64]string{
 	6: "motion", 7: "baby_cry", 9: "doorbell", 10: "package", 11: "animal", 12: "animal", 13: "animal",
 }
 
+// EventID returns the eventId of a JSON detection push, or "" for anything else.
+func EventID(packet []byte) string {
+	var ev struct {
+		EventID string `json:"eventId"`
+	}
+	if len(packet) == 0 || packet[0] != '{' || json.Unmarshal(packet, &ev) != nil {
+		return ""
+	}
+	return ev.EventID
+}
+
 // ParseEventTags returns the alg-tag event names in a REPORT_IPCAMERA_EVENT push.
 func ParseEventTags(packet []byte) []string {
 	// The cloud also pushes detections as JSON ({"businessType":3000001,...,"eventId":...}).
 	// shortcut: that JSON has no detection type (person and cat look the same), so each one is
 	// reported as motion; upgrade when the type can be fetched by eventId.
 	if len(packet) > 0 && packet[0] == '{' {
-		var ev struct {
-			EventID string `json:"eventId"`
-		}
-		if json.Unmarshal(packet, &ev) == nil && ev.EventID != "" {
+		if EventID(packet) != "" {
 			return []string{"motion"}
 		}
 		return nil
