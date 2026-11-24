@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"os"
 	"sync"
 	"time"
 
@@ -20,6 +21,10 @@ import (
 )
 
 var iv = []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+
+// pushDebug logs every inbound frame that is not a reply to one of our own
+// requests, and every frame dropped before dispatch. Enable: ANONA_PUSH_DEBUG=1.
+var pushDebug = os.Getenv("ANONA_PUSH_DEBUG") == "1"
 
 const AppDeviceType = cloud.DeviceType // 72
 const TargetDevice = 2
@@ -163,10 +168,16 @@ func (c *Channel) readLoop() {
 		}
 		pt, err := unframe(c.key, string(msg))
 		if err != nil {
+			if pushDebug {
+				fmt.Printf("[ctl] drop: unframe: %v (len=%d)\n", err, len(msg))
+			}
 			continue
 		}
 		var r Reply
-		if json.Unmarshal(pt, &r) != nil {
+		if err := json.Unmarshal(pt, &r); err != nil {
+			if pushDebug {
+				fmt.Printf("[ctl] drop: json: %v pt=%.200s\n", err, pt)
+			}
 			continue
 		}
 		c.mu.Lock()
@@ -177,9 +188,23 @@ func (c *Channel) readLoop() {
 			continue
 		}
 		// device-initiated push with content
+		if pushDebug {
+			n := len(r.Content)
+			if n > 400 {
+				n = 400
+			}
+			ack := -1
+			if r.AckCode != nil {
+				ack = *r.AckCode
+			}
+			fmt.Printf("[ctl] push dev=%s operateId=%q ack=%d contentLen=%d hex=%s\n",
+				r.DeviceID, r.OperateID, ack, len(r.Content), r.Content[:n])
+		}
 		if r.Content != "" {
 			if b, err := hex.DecodeString(r.Content); err == nil {
 				c.dispatch(Push{DeviceID: r.DeviceID, Packet: b})
+			} else if pushDebug {
+				fmt.Printf("[ctl] drop: content not hex: %v\n", err)
 			}
 		}
 	}
