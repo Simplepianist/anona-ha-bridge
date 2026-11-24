@@ -190,8 +190,8 @@ func (c *Channel) readLoop() {
 		// device-initiated push with content
 		if pushDebug {
 			n := len(r.Content)
-			if n > 400 {
-				n = 400
+			if n > 4096 {
+				n = 4096
 			}
 			ack := -1
 			if r.AckCode != nil {
