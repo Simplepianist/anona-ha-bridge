@@ -7,9 +7,7 @@ package supervisor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -296,21 +294,16 @@ func (b *Bridge) startMQTT(ch *control.Channel, t cameraTarget, clientID string)
 		if tags := cam.ParseEventTags(p.Packet); len(tags) > 0 {
 			hub.OnEvent(tags)
 		}
-		if id := cam.EventID(p.Packet); id != "" && os.Getenv("ANONA_PUSH_DEBUG") == "1" {
-			go b.probeEventInfo(t.dev.DeviceID, id)
+		if id, ts := cam.EventRef(p.Packet); id != "" {
+			go func() {
+				tags, err := b.cl.EventTags(t.dev.HomeID, id, ts)
+				names := cam.TagNames(tags)
+				fmt.Printf("[%s] event tags=%v err=%v -> %v\n", t.path, tags, err, names)
+				hub.OnEvent(names)
+			}()
 		}
 	})
 	return hub, nil
-}
-
-var urlRe = regexp.MustCompile(`"https?://[^"]*"`)
-
-// probeEventInfo logs the cloud's record for a pushed eventId (ANONA_PUSH_DEBUG=1),
-// to find where the detection type lives. URLs are redacted: they may carry signed tokens.
-func (b *Bridge) probeEventInfo(deviceID, eventID string) {
-	out, err := b.cl.Call("/anona/event/api/getEventInfoV2", map[string]any{"deviceId": deviceID, "eventId": eventID})
-	js, _ := json.Marshal(out)
-	fmt.Printf("[evt] getEventInfoV2 err=%v resp=%.4000s\n", err, urlRe.ReplaceAll(js, []byte(`"<url>"`)))
 }
 
 func (b *Bridge) setSession(path string, s *media.Session) {
