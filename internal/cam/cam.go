@@ -3,6 +3,7 @@
 package cam
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -300,6 +301,18 @@ var algName = map[uint64]string{
 
 // ParseEventTags returns the alg-tag event names in a REPORT_IPCAMERA_EVENT push.
 func ParseEventTags(packet []byte) []string {
+	// The cloud also pushes detections as JSON ({"businessType":3000001,...,"eventId":...}).
+	// shortcut: that JSON has no detection type (person and cat look the same), so each one is
+	// reported as motion; upgrade when the type can be fetched by eventId.
+	if len(packet) > 0 && packet[0] == '{' {
+		var ev struct {
+			EventID string `json:"eventId"`
+		}
+		if json.Unmarshal(packet, &ev) == nil && ev.EventID != "" {
+			return []string{"motion"}
+		}
+		return nil
+	}
 	top, ok := pb.Decode(packet)
 	if !ok {
 		return nil
