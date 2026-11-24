@@ -9,10 +9,12 @@ import (
 	"compress/zlib"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -175,6 +177,17 @@ func Start(cl *cloud.Client, ch *control.Channel, deviceID, clientID string, ice
 		}
 	})
 
+	// Probe for a camera data channel (detection events?). Off by default: it adds m=application to the offer.
+	dcProbe := os.Getenv("ANONA_DC_PROBE") == "1"
+	if dcProbe {
+		pc.OnDataChannel(probeDataChannel)
+		dc, err := pc.CreateDataChannel("kvsDataChannel", nil)
+		if err != nil {
+			return nil, fmt.Errorf("create data channel: %w", err)
+		}
+		probeDataChannel(dc)
+	}
+
 	// Build offer, strip extmap, compress, send WEB_RTC_START.
 	offer, err := pc.CreateOffer(&webrtc.OfferOptions{})
 	if err != nil {
@@ -197,6 +210,13 @@ func Start(cl *cloud.Client, ch *control.Channel, deviceID, clientID string, ice
 	if err != nil {
 		return nil, err
 	}
+	if dcProbe {
+		for _, l := range strings.Split(answerSDP, "\n") {
+			if strings.HasPrefix(l, "m=") {
+				fmt.Println("[dc] answer", strings.TrimSpace(l))
+			}
+		}
+	}
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: answerSDP}); err != nil {
 		return nil, fmt.Errorf("set answer: %w", err)
 	}
@@ -218,6 +238,19 @@ func Start(cl *cloud.Client, ch *control.Channel, deviceID, clientID string, ice
 	}()
 
 	return s, nil
+}
+
+// probeDataChannel logs everything a data channel does (ANONA_DC_PROBE=1).
+func probeDataChannel(dc *webrtc.DataChannel) {
+	label := dc.Label()
+	dc.OnOpen(func() { fmt.Printf("[dc] open label=%s\n", label) })
+	dc.OnClose(func() { fmt.Printf("[dc] close label=%s\n", label) })
+	dc.OnMessage(func(m webrtc.DataChannelMessage) {
+		fmt.Printf("[dc] msg label=%s len=%d hex=%.400x\n", label, len(m.Data), m.Data)
+		if utf8.Valid(m.Data) {
+			fmt.Printf("[dc] msg label=%s text=%.400q\n", label, m.Data)
+		}
+	})
 }
 
 // parseAnswer extracts and inflates webrtc_start_response.sdp_answer_compressed.
